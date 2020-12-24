@@ -1,2 +1,4 @@
-# kaggle_dataset_customervalueanalysis_12242020
-Kaggle - Dataset - Customer Value Analysis - 12242020
+# ABOUT
+
+- Kaggle - Dataset - Customer Value Analysis - 12242020
+- Published: https://rpubs.com/cxh190001/707445

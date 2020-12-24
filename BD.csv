@@ -1,0 +1,31 @@
+﻿State,City,Latitude,Longitude,Customer,Category,Region,Business.Opportunity,Business.Size,Technology.Complexity,Acquaintance
+ CA,Sunnyvale,37.4221,-122.0841,Amazon,Consumer Electronic,West,5,5,4,5
+ NJ,Basking Ridge,37.3688,-122.0363,Verizon,Carrier,East,5,5,3,5
+ CA,Mountain View,40.7066,-74.5493,Google,Consumer Electronic,West,3,5,3,5
+ CA,Newark,37.3861,-122.0839,Logitech,Consumer Electronic,West,5,3,3,5
+ FL,Miami,25.7617,-80.1918,Tracfone,Carrier,South,5,3,3,5
+ CA,Irvine,43.0389,-87.9065,Ingram Micro,Carrier,West,5,3,3,5
+ WI,Milwaukee,33.6846,-117.8265,Johnson Controls,Consumer Electronic,North,5,3,2,5
+ NJ,New Brunswick,43.0389,-87.9065,Johnson & Johnson,Medical,East,5,3,2,5
+ NY,New York,40.4862,-74.4518,VOXX,Automotive,East,5,3,2,5
+ MI,Detroit,40.7128,-74.006,Fiat Chrysler Automobiles,Automotive,North,5,3,2,5
+ CA,Santa Monica,42.3314,-83.0458,Ring,Consumer Electronic,West,3,3,4,5
+ IL,Chicago,34.0195,-118.4912,GE Healthcare,Medical,North,5,3,1,5
+ CA,Menlo Park,41.8781,-87.6298,Facebook,Consumer Electronic,West,3,3,2,5
+ CA,Palo Alto,37.453,-122.1817,Tesla,Automotive,West,3,3,2,5
+ CA,San Francisco,37.4419,-122.143,Fitbit,Consumer Electronic,West,3,3,3,4
+ CA,Cupertino,37.7749,-122.4194,Apple,Consumer Electronic,West,1,5,2,4
+ CA,San Mateo,37.323,-122.0322,GoPro,Consumer Electronic,West,3,3,2,4
+ CA,Brea,37.563,-122.3255,TP-Link,Consumer Electronic,West,3,3,4,2
+ CA,Irvine,33.9165,-117.9003,Aluratek,Consumer Electronic,West,3,3,4,2
+ CA,City of Industry,33.6846,-117.8265,Mediasonic,Consumer Electronic,West,3,3,4,2
+ IL,Chicago,34.0197,-117.9587,Abbott,Medical,North,1,3,3,3
+ CA,Santa Jose,41.8781,-87.6298,Samsung,Consumer Electronic,West,1,5,3,1
+ CA,San Jose,37.3382,-121.8863,NETGEAR,Consumer Electronic,West,1,3,4,2
+ CA,Irvine,33.9165,-117.9003,Oculus,Consumer Electronic,West,3,1,1,4
+ CA,Los Gatos,33.6846,-117.8265,Roku,Consumer Electronic,West,1,1,4,3
+ CA,Santa Clara,37.2358,-121.9624,Agilent,Medical,West,1,1,4,3
+ CA,Hercules,37.3541,-121.9552,Bio-Rad,Medical,West,1,1,4,3
+ CA,Torrance,38.0171,-122.2886,Pioneer,Automotive,West,1,3,2,2
+ NJ,Franklin Lakes,33.8358,-118.3406,Becton Dickinson,Medical,East,1,1,2,3
+ CA,San Francisco,41.0168,-74.2057,Fluidigm,Medical,West,1,1,2,3

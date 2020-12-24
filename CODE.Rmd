@@ -1,0 +1,606 @@
+---
+title: "Customer Value Analysis (RFM Analysis)"
+author: "Chun-Li Hou"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+## Content
+
+- [1. Introduction](#1)
+    - [Background](#1.1)
+- [2. Preparation](#2)
+    - [Environment](#2.1)
+    - [Dataset](#2.2)
+- [3. Exploring Data Analysis](#3)
+    - [Histogram](#3.1)
+    - [Boxplot](#3.2)
+- [4. Model Data Analysis](#4)
+    - [Preprocessing](#4.1)
+    - [Machine Learning](#4.2)
+        - [Hierarchical Clustering](#4.2.1)
+        - [Non Hierarchical Clustering](#4.2.2)
+        - [Decision Tree Regression](#4.2.3)
+- [5. Conclusion](#5)
+- [6. Case Study](#6)
+    - [Non Hierarchical Clustering](#6.1)
+    - [Decision Tree Regression](#6.2)
+- [7. Reference](#7)
+
+## 1. Introduction <a name = "1"></a>
+
+### Background <a name = "1.1"></a>
+
+RFM analysis is a method used for analyzing customer value. RFM stands for the three dimensions:
+
+- Recency - How recently did the customer purchase?
+- Frequency - How often do they purchase?
+- Monetary Value - How much do they spend?
+
+The resulting segments can be ordered from most valuable (highest recency, frequency, and value) to least valuable (lowest recency, frequency, and value). Identifying the most valuable RFM segments can captialize on chance relationships in the data used for this analysis.
+
+## 2. Preparation <a name = "2"></a>
+
+### Environment <a name = "2.1"></a>
+
+Let us set up the environment and be ready for the analysis.
+
+```{r}
+# setting gotop
+gotop::use_gotop()
+
+# loading package
+if(!require("pacman")) install.packages("pacman")
+pacman::p_load(dplyr, tidyr, ggplot2, ggpubr,
+               forcats, formattable, factoextra, scales, 
+               vegan, caret, rpart, rpart.plot, rattle, leaflet)
+
+# setting plot
+theme = theme_bw() +
+  theme(plot.title = element_text(face = "bold", size = (15)),
+        plot.subtitle = element_text(size = (10)),
+        axis.title = element_text(size = (10))) +
+  theme(axis.text.x = element_text(angle = 0), legend.position = "none")
+```
+
+### Dataset <a name = "2.2"></a>
+
+First, let us load and examine the data. This data from the Kaggle and originate from the UCI machine learning repository. It contains transactions for an UK-based online retailer. The data contains transactions from the period 2010 to 2011 and is in country and date. Firstly, the data dimension is 541,909 rows and 8 columns.
+
+```{r}
+# importing data
+df.0 = read.csv("DATA.csv")
+dim(df.0)
+```
+
+We have to delete all negative quantity and price. Also, we need to delete NA in customer ID.
+
+```{r}
+# cleaning data from standard
+df.1 = df.0 %>% mutate(Quantity = replace(Quantity, Quantity <= 0, NA),
+                       UnitPrice = replace(UnitPrice, UnitPrice <= 0, NA))
+df.1 = df.1 %>% drop_na()
+dim(df.1)
+```
+
+We need to clean up the data with some domain knowledge as well to make it logical enough for the future use. Here are some domain knowledge contrains for feature engineering.
+
+- Remove amazon related fees and adjusted transactions
+- Remove cancelled orders
+- Remove duplicated observations
+
+```{r}
+# cleaning data from domain knowledge
+df.1 = df.1 %>% 
+  filter(!grepl("amazon", Description, ignore.case = T) & !grepl("adjust", Description, ignore.case = T)) %>% 
+  filter(!grepl("C", StockCode)) %>% 
+  distinct()
+dim(df.1)
+```
+
+We should recode and convert some variables from character to factor.
+
+```{r}
+# recoding data
+df.2 = df.1 %>% mutate(InvoiceNo = as.factor(InvoiceNo),
+                       StockCode = as.factor(StockCode),
+                       InvoiceDate = as.Date(InvoiceDate, "%m/%d/%Y %H:%M"),
+                       CustomerID = as.factor(CustomerID),
+                       Country = as.factor(Country))
+df.2 = df.2 %>% mutate(total.dolar = Quantity * UnitPrice)
+dim(df.2)
+```
+
+As for implementing the RFM analysis, we need to further process the data by the following steps:
+
+- Recency: find the most recent date for each ID and caluclate the days to now or some other date.
+- Frequency: calculate the quantity of translations of a customer, which gets the frequency data.
+- Monetary: sum the amount of money a customer spent and divide it by Frequency, which gets the amount per transaction on average.
+
+```{r, fig.width = 4, fig.height = 2}
+# calcuating RFM
+df.3 = df.2 %>% 
+  group_by(CustomerID) %>% 
+  summarise(Recency = as.numeric(as.Date("2011-12-31") - max(InvoiceDate)),
+            Frequency = n_distinct(InvoiceNo),
+            Monetary= sum(total.dolar, na.rm = T) / Frequency)
+df.3 %>% 
+  head() %>% 
+  mutate(across(is.numeric, ~ format(round(., 0), nsmall = 0))) %>% 
+  ggtexttable(rows = NULL, theme = ttheme("classic"))
+```
+
+Due to already knowing roughly the serious skewness, we impliment the z-score outlier removal method to correct the skewness a bit and make data more normal distributed. We take only 95% of the data in normal distribution and dicard 5% of the data as outlier by setting a boundary with three normalized standardard deiations. 
+
+```{r}
+# fixing skewness
+df.3 = df.3 %>% filter(!(abs((Recency - mean(Recency, na.rm = T)) / sd(Recency, na.rm = T)) > 3))
+df.3 = df.3 %>% filter(!(abs((Frequency - mean(Frequency, na.rm = T)) / sd(Frequency, na.rm = T)) > 3))
+df.3 = df.3 %>% filter(!(abs((Monetary - mean(Monetary, na.rm = T)) / sd(Monetary, na.rm = T)) > 3))
+```
+
+## 3. Exploring Data Analysis <a name = "3"></a>
+
+### Histogram <a name = "3.1"></a>
+
+We can see the distribution for each RFM index. Also, due to the data is really skewed, we use log scale to normalize. But, the variable transformation is only acceptable for monetary. The other two variable transformations are either devarianced or indifferent.
+
+```{r, fig.width = 12, fig.height = 6}
+p.1 = ggplot(data = df.3, aes(x = Recency)) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Recency", subtitle = "How recently did the customer purchase?", x = NULL, y = "Count")
+p.2 = ggplot(data = df.3, aes(x = Frequency)) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Frequency", subtitle = "How often do the customer purchase?", x = NULL, y = NULL)
+p.3 = ggplot(data = df.3, aes(x = Monetary)) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Monetary", subtitle = "How much do the customer spend?", x = NULL, y = NULL)
+p.4 = ggplot(data = df.3, aes(x = log(Recency))) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Recency", subtitle = "No log-transformation for no variance", x = "Day", y = "Count")
+p.5 = ggplot(data = df.3, aes(x = log(Frequency))) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Frequency", subtitle = "No log-transformation for no difference", x = "Time", y = NULL)
+p.6 = ggplot(data = df.3, aes(x = log(Monetary))) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Monetary", subtitle = "Yes log-transformation for normalization", x = "Dollar", y = NULL)
+ggarrange(p.1, p.2, p.3, p.4, p.5, p.6, nrow = 2, ncol = 3)
+```
+
+### Boxplot <a name = "3.2"></a>
+
+We can see the distribution for each RFM index. The clustering process can be espressed as an estimate of the variance of each of the clusters with respect to each of the variables. So, standardizing the variable to have equal variance is importnat because it means they get weighted equally with respect to each other.
+
+As for the variables belonging to known distributions, it has nothing to do with. However, the solution might indeed be more stable with normal distributed variables because the variance is sensitive to outliers. So, outliers could certainly be driving the solutions you arrive at. In the record, normalizing, such as log transformation, could lose variance or devarianced.
+
+In summary, scaling is necessary; but, normalizing is optional. However, at this time, we want to get a stable result which might not be the global optimum. So, the variables are not only log transformed but also scaled.
+
+As for the sequence, we should impose normalizing firstly and then scaling later.
+
+```{r, fig.width = 12, fig.height = 6}
+p.1 = ggplot(df.3, aes(x = "", y = Recency)) +
+  geom_boxplot(width = 0.3, fill = "gray", alpha = 0.7) + 
+  rotate() +
+  theme + 
+  labs(title = "Recency", subtitle = "How recently did the customer purchase?", x = "Day", y = NULL)
+p.2 = ggplot(df.3, aes(x = "", y = Frequency)) +
+  geom_boxplot(width = 0.3, fill = "gray", alpha = 0.7) + 
+  rotate() +
+  theme + 
+  labs(title = "Frequency", subtitle = "How often do the customer purchase?", x = "Time", y = NULL)
+p.3 = ggplot(df.3, aes(x = "", y = Monetary)) +
+  geom_boxplot(width = 0.3, fill = "gray", alpha = 0.7) + 
+  rotate() +
+  theme + 
+  labs(title = "Monetary", subtitle = "How much do the customer spend?", x = "Dollar", y = NULL)
+p.4 = ggplot(df.3, aes(x = "", y = scale(log(Recency)))) +
+  geom_boxplot(width = 0.3, fill = "gray", alpha = 0.7) + 
+  rotate() +
+  theme + 
+  labs(title = "Recency", subtitle = "Log and scale transformation", x = NULL, y = NULL)
+p.5 = ggplot(df.3, aes(x = "", y = scale(log(Frequency)))) +
+  geom_boxplot(width = 0.3, fill = "gray", alpha = 0.7) + 
+  rotate() +
+  theme + 
+  labs(title = "Frequency", subtitle = "Log and scale transformation", x = NULL, y = NULL)
+p.6 = ggplot(df.3, aes(x = "", y = scale(log(Monetary)))) +
+  geom_boxplot(width = 0.3, fill = "gray", alpha = 0.7) + 
+  rotate() +
+  theme + 
+  labs(title = "Monetary", subtitle = "Log and scale transformation", x = NULL, y = NULL)
+ggarrange(p.1, p.4, p.2, p.5, p.3, p.6, nrow = 3, ncol = 2)
+```
+
+## 4. Model Data Analysis <a name = "4"></a>
+
+### Preprocessing <a name = "4.1"></a>
+
+We use log transformation for normalization and scale transformation for standarization.
+
+```{r}
+# preparing data
+df.4 = df.3
+df.4$CustomerID = NULL
+df.4 = scale(log(df.4))
+
+# preparing result set
+df.5 = df.3
+```
+
+### Machine Learning <a name = "4.2"></a>
+
+- Clustering is an unsupervised machine learning which has no label variable, only independent variable, or no correct answer.
+- Due to no label, it is no way to evaluate and no need to do data seperation.
+- Basic utility is recommendation engine.
+
+#### Hierarchical Clustering <a name = "4.2.1"></a>
+
+HC is a computationally expensive, low stable, and sensitive to outliers. But, it is good at easily understanding and interpreting. We already apply feature scaling for measuring the euclidean distance. We identify method as ward.D, which is minimized within cluster variance, is the our most fit-expected clustering way for equally distributing each group.
+
+```{r, fig.width = 12, fig.height = 6}
+# fitting model
+mod.1 = hclust(dist(df.4, method = "euclidean"), method = "ward.D")
+mod.2 = hclust(dist(df.4, method = "euclidean"), method = "ward.D2")
+mod.3 = hclust(dist(df.4, method = "euclidean"), method = "single")
+mod.4 = hclust(dist(df.4, method = "euclidean"), method = "complete")
+mod.5 = hclust(dist(df.4, method = "euclidean"), method = "average")
+mod.6 = hclust(dist(df.4, method = "euclidean"), method = "mcquitty")
+mod.7 = hclust(dist(df.4, method = "euclidean"), method = "median")
+mod.8 = hclust(dist(df.4, method = "euclidean"), method = "centroid")
+
+# visualizing model
+par(mfrow = c(2, 4))
+plot(mod.1); plot(mod.2); plot(mod.3); plot(mod.4); plot(mod.5); plot(mod.6); plot(mod.7); plot(mod.8)
+```
+
+We use silhouette plot to have the optimal number of cluster for this data. Eventually, our possible optimal seperate cluster number is 2. However, there is a sudden move around number of cluster of 6. That shows the sprit of elbow plot. According to the result of the elbow plot and the further studying, it seems like 4 centroids would be the best fit to segment out data. Perhaps a model with more centroids would work as well, such as 7 to 10 centroids, but for simplicity we will stick to the minimum required number of cluster.
+
+```{r, fig.width = 6, fig.height = 4}
+# choosing cluster
+fviz_nbclust(df.4, hcut) + theme
+```
+
+We plot the dendrogram to show the tree clustering structure.
+
+```{r, fig.width = 6, fig.height = 4}
+# pruning tree
+mod.hc = cutree(mod.1, 6)
+
+# recording data
+df.5$Cluster.HC = as.factor(mod.hc)
+
+# generating tree plot
+fviz_dend(mod.1, k = 6,
+          show_labels = F, rect = F,
+          main = "Dendrogram",
+          xlab = "Customer",
+          ylab = "Euclidean distance") + theme
+```
+
+We know the RFM indexs from each group.
+
+```{r, fig.width = 3, fig.height = 2}
+# generating information table
+df.5 %>% 
+  aggregate(by = list(df.5$Cluster.HC), mean) %>% 
+  select(3:5) %>% 
+  mutate(across(is.numeric, ~ format(round(., 2), nsmall = 2))) %>%
+  ggtexttable(rows = NULL, theme = ttheme("classic"))
+```
+
+We plot the scatter plot to know the distribution on the 2D space.
+
+```{r, fig.width = 6, fig.height = 4}
+# generating scatter plot
+fviz_cluster(list(data = df.4, cluster = mod.hc),
+             stand = F, show.clust.cent = F, geom = "point",
+             main = "Hierarchical clustering") + theme
+```
+
+#### Non Hierarchical Clustering <a name = "4.2.2"></a>
+
+Non Hierarchical Clustering is the decision tree version for Hierarchical Clustering. Here, we use K-means Clustering. This is more appropriate for big data.
+
+We calculate WCSS to decide the optimal number of cluster. WCSS elbow chart is the opposite of GOF (goodness of fit) elbow chart, which used above for deciding the hierarchical clustering optimal number of cluster. The way to see the elbow chart is getting the first point from the long line.
+
+The optimal number of cluster decision is not a definite choose but a relative option. The result has to be matched up with the domain knowledge. Otherwise, the analytic result would be totally useless.
+
+In this case, our optimal numver of cluster is 6, which is the same as the above mentioned result.
+
+```{r, fig.width = 6, fig.height = 4}
+# choosing cluster
+set.seed(123)
+wcss.set = data.frame(k = seq(1, 20, 1), wcss = rep(0, 20))
+for (i in 1:20) {wcss.set[i, 2] = kmeans(df.4, i)$tot.withinss}
+ggplot(data = wcss.set, aes(x = k, y = wcss)) +
+  geom_point() +
+  geom_line(linetype = "dashed") +
+  scale_x_continuous(breaks = pretty_breaks(nrow(wcss.set))) +
+  theme + 
+  labs(title = "Optimal number of clusters",
+       subtitle = "Within Cluster Sum of Squared Distance (WCSS)",
+       x = "Number of clusters k",
+       y = "WCSS")
+```
+
+```{r, fig.width = 12, fig.height = 6}
+# choosing cluster
+cascade = cascadeKM(df.4, inf.gr = 2, sup.gr = 10, iter = 1000, criterion = "ssi")
+plot(cascade, sortg = T)
+```
+
+We know the RFM indexs from each group.
+
+```{r, fig.width = 3, fig.height = 2}
+# fitting model
+set.seed(123)
+mod.nhc = kmeans(df.4, centers = 6, nstart = 50)
+
+# recording data
+df.5$Cluster.NHC = as.factor(mod.nhc$cluster)
+
+# generating information table
+df.5 %>%
+  aggregate(by = list(df.5$Cluster.NHC), mean) %>%
+  select(3:5) %>%
+  mutate(across(is.numeric, ~ format(round(., 2), nsmall = 2))) %>%
+  ggtexttable(rows = NULL, theme = ttheme("classic"))
+```
+
+We plot the scatter plot to know the distribution on the 2D space.
+
+```{r, fig.width = 6, fig.height = 4}
+# generating scatter plot
+fviz_cluster(mod.nhc, data = df.4,
+             stand = F, show.clust.cent = F, geom = "point",
+             main = 'Non hierarchical clustering') + theme
+```
+
+#### Decision Tree Regression <a name = "4.2.3"></a>
+
+We combine and generate RFM index by adding up the normalizing value of recency, frequency, and monetary. Then, we use decision tree regression model to generate the tree. Next, we prune the tree to above mentioned number of cluster.
+
+```{r, fig.width = 9, fig.height = 3}
+# for only two group as a reference
+# cm = table(df.5$Cluster.HC, df.5$Cluster.NHC) %>% confusionMatrix()
+
+# preparing data
+df.6 = df.3[, -c(1)]
+df.6 = lapply(df.6, normalize)
+df.6 = df.6 %>% as.data.frame() %>% mutate(RFM = Recency + Frequency + Monetary)
+
+# fitting model
+mod.dt = rpart(formula = RFM ~ .,
+               data = df.6,
+               control = rpart.control(minsplit = 20))
+rpart.rules(mod.dt, cover = T, roundint = F) %>% ggtexttable(rows = NULL, theme = ttheme("classic"))
+```
+
+We prune the tree to fit as our mentioned above result.
+
+```{r, fig.width = 7, fig.height = 4}
+# choosing cluster
+plotcp(mod.dt)
+
+# pruning tree
+mod.dt.p = rpart(formula = RFM ~ .,
+                 data = df.6,
+                 control = rpart.control(cp = 0.026))
+```
+
+This is the tree.
+
+```{r, fig.width = 6, fig.height = 4}
+# generating tree plot
+fancyRpartPlot(mod.dt.p)
+```
+
+This is the rule.
+
+```{r, fig.width = 7, fig.height = 2}
+# generating information table
+rpart.rules(mod.dt.p, cover = T, roundint = F) %>% ggtexttable(rows = NULL, theme = ttheme("classic"))
+```
+
+We record all results in analyzing model. We can output the file in csv.file to do further analysis in other software.
+
+```{r}
+# recording data
+View(df.5)
+temp = factor(mod.dt.p$where, labels = c(1, 2, 3, 4, 5, 6))
+df.6 = df.6 %>% mutate(Cluster.DT = temp)
+df.5$Cluster.DT = df.6$Cluster.DT
+
+# finalizing data
+glimpse(df.5)
+
+# outputing data
+write.csv(df.5,"OUTPUT.csv", row.names = F)
+```
+
+## 5. Conclusion <a name = "5"></a>
+
+There is not an obvious difference in clusters. The main point might be due to devariance by the normalization. Also, we erase the outlier for more normalization. This also cause devraiance. But, we can still take a closer look to the means of each cluster and classfiy the customers.
+
+- High frequency and low recency
+- High recency and low frequency
+- High Monetary, median frequency, and median recency
+
+There can be only identified like three groups now. As for the other three groups, the values are too closed and also on the plot.
+
+## 6. Case Study <a name = "6"></a>
+
+### Non Hierarchical Clustering <a name = "6.1"></a>
+
+This part is for the case study to make the decision on which customer has more priority to develope first in order to achieve the business opportunity. Let us import the data.
+
+```{r}
+# data
+df.0 = read.csv("BD.csv")
+colnames(df.0) = c("State", "City", "Latitude", "Longitude", 
+                   "Customer", "Category", "Region", 
+                   "B.O", "B.S", "T.C", "A.C")
+df.1 = df.0[, c(8:11)]
+```
+
+Let us see the distribution of the data.
+
+```{r, fig.width = 12, fig.height = 6}
+# histogram
+p.1 = ggplot(data = df.1, aes(x = B.O)) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Business Opportunity", subtitle = "How possible to close a deal?", x = NULL, y = "Count")
+p.2 = ggplot(data = df.1, aes(x = B.S)) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Business Size", subtitle = "How much for the revenue?", x = NULL, y = NULL)
+p.3 = ggplot(data = df.1, aes(x = T.C)) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Technology Complexity", subtitle = "How hard for the technical difficulty?", x = NULL, y = NULL)
+p.4 = ggplot(data = df.1, aes(x = A.C)) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Acquaintance", subtitle = "How many contact channel we have?", x = NULL, y = NULL)
+p.5 = ggplot(data = df.1, aes(x = normalize(B.O))) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Business Opportunity", subtitle = "After normalizing", x = NULL, y = "Count")
+p.6 = ggplot(data = df.1, aes(x = normalize(B.S))) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Business Size", subtitle = "After normalizing", x = NULL, y = NULL)
+p.7 = ggplot(data = df.1, aes(x = normalize(T.C))) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Technology Complexity", subtitle = "After normalizing", x = NULL, y = NULL)
+p.8 = ggplot(data = df.1, aes(x = normalize(A.C))) + 
+  geom_histogram(color = "white", alpha = 0.9) + 
+  theme + 
+  labs(title = "Acquaintance", subtitle = "After normalizing", x = NULL, y = NULL)
+ggarrange(p.1, p.2, p.3, p.4, p.5, p.6, p.7, p.8, nrow = 2, ncol = 4)
+```
+
+Let us sacle the data firstly.
+
+```{r}
+# scale
+df.2 = df.1
+df.2 = df.2 %>% lapply(normalize) %>% as.data.frame()
+```
+
+Let us cluster it with non hierarchical clustering method firstly. We gonna find the optimal number for the data to clustering.
+
+```{r, fig.width = 6, fig.height = 4}
+# cluster
+set.seed(123)
+wcss.set = data.frame(k = seq(1, 10, 1), wcss = rep(0, 10))
+for (i in 1:10) {wcss.set[i, 2] = kmeans(df.2, i)$tot.withinss}
+ggplot(data = wcss.set, aes(x = k, y = wcss)) +
+  geom_point() +
+  geom_line(linetype = "dashed") +
+  scale_x_continuous(breaks = pretty_breaks(nrow(wcss.set))) +
+  theme + 
+  labs(title = "Optimal number of clusters",
+       subtitle = "Within Cluster Sum of Squared Distance (WCSS)",
+       x = "Number of clusters k",
+       y = "WCSS")
+```
+
+Let us build the model. And, we can see the tree and the group seperated.
+
+```{r, fig.width = 6, fig.height = 4}
+# model
+set.seed(123)
+mod.6.1 = kmeans(df.2, centers = 2, nstart = 50)
+
+# group
+fviz_cluster(mod.6.1, df.2,
+             stand = F, show.clust.cent = F, geom = "point",
+             main = 'Non hierarchical clustering') + theme
+```
+
+We can see the rule for the clusters.
+
+```{r, fig.width = 3, fig.height = 1}
+# rule
+mod.6.1$centers %>% 
+  as.data.frame() %>% 
+  mutate(across(is.numeric, ~ format(round(., 2), nsmall = 2))) %>%
+  ggtexttable(rows = c("First Priority", "Second Priority"), theme = ttheme("classic"))
+```
+
+### Decision Tree Regression <a name = "6.2"></a>
+
+Furthermore, we use supervised method, different than mentioned above as unsupervised method, to revise the analysis result. Our label for the data comes from the combination index for our four business development score with different weight individually.
+
+```{r}
+# data
+df.2 = df.2 %>% mutate(Index = B.O*0.30 + B.S*0.25 + T.C*0.15 + A.C*0.30)
+```
+
+Let us build the model, the decision tree regression model.
+
+```{r}
+# model
+mod.6.2 = rpart(formula = Index ~ .,
+                data = df.2,
+                control = rpart.control(minsplit = 20))
+```
+
+Let us see the tree plot.
+
+```{r, fig.width = 6, fig.height = 4}
+# tree
+fancyRpartPlot(mod.6.2)
+```
+
+Let us know the tree rule.
+
+```{r, fig.width = 5, fig.height = 1}
+# rule
+rpart.rules(mod.6.2, cover = T, roundint = F) %>% 
+  ggtexttable(rows = c("Second Priority", "First Priority"), theme = ttheme("classic"))
+```
+
+Finally, we can output the data for the further analysis.
+
+```{r}
+# output
+df.3 = df.0
+df.3$cluster.6.1 = mod.6.1$cluster
+df.3$cluster.6.2 = factor(mod.6.2$where, labels = c(2, 1))
+write.csv(df.3,"BD.OUTPUT.csv", row.names = F)
+```
+
+Also, we put our targets on the map to see the priority sequence.
+
+```{r, fig.width = 9.5, fig.height = 4}
+# map
+pal = colorFactor(palette = c("#D7191C", "#2B83BA"), df.3$cluster.6.1)
+df.3 %>% 
+  leaflet() %>% 
+  addTiles() %>%
+  addCircleMarkers(lng = df.3$Longitude, lat = df.3$Latitude, 
+                   color = pal(df.3$cluster.6.1), 
+                   radius = 3, weight = 6,
+                   label = paste(df.3$Category, "-", df.3$Customer)) %>% 
+  addLegend("topright", pal = pal, values = df.3$cluster.6.1, title = "Priority", opacity = 0.6)
+```
+
+## 7. Reference <a name = "7"></a>
+
+1. [E-Commerce Data/2017/Kaggle](https://tinyurl.com/yaont6m6) 
+2. [Customer Segmentation using RFM Analysis/2017/M Hendra Herviawan](https://tinyurl.com/y7gopben)
